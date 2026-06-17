@@ -16,3 +16,5 @@ tsconfig.tsbuildinfo
 .next/
 backtest_results/
 dashboard/
+
+.vercel
