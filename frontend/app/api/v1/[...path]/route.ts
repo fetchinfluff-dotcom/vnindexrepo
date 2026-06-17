@@ -65,7 +65,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
         const [feat, bars] = await Promise.all([
           restGet('stock_features', { ticker: `eq.${tickerParam}`, limit: '1' }),
           restGet('daily_bars_adjusted', {
-            select: 'ticker,date,adj_open:open,adj_high:high,adj_low:low,adj_close:close,adj_volume:volume',
+            select: 'ticker,date,open,high,low,close,volume',
             ticker: `eq.${tickerParam}`, order: 'date.desc', limit: '120',
           }),
         ])
@@ -122,14 +122,27 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
 
       const rows = await restGet('stock_features', { select: '*', and: `(${filters.join(',')})`, order: 'ticker.asc' })
 
+      // Fetch raw + adjusted prices from daily_bars_adjusted for correct display
+      // stock_features.price = adj_close (VCI-adjusted), but we show real market price
       const today = rows[0]?.date
-      const allPrev = today ? await restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low', date: `lt.${today}`, order: 'date.desc,ticker.asc' }) : []
-      const closeMap = new Map<number | string, number>()
-      const prevOHLCMap = new Map<number | string, { close: number; open: number; high: number; low: number }>()
-      for (const b of allPrev) {
-        if (!closeMap.has(b.ticker)) {
-          closeMap.set(b.ticker, b.close)
-          prevOHLCMap.set(b.ticker, b)
+      let realPriceMap = new Map<string, { close: number; open: number; high: number; low: number }>()
+      let prevAdjMap = new Map<string, { close: number; open: number; high: number; low: number }>()
+      let prevRealMap = new Map<string, { close: number }>()
+      if (today) {
+        const [latestBars, prevBarsRaw] = await Promise.all([
+          restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low', date: `eq.${today}` }),
+          restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low,adj_close,adj_open,adj_high,adj_low', date: `lt.${today}`, order: 'date.desc,ticker.asc' }),
+        ])
+        for (const b of latestBars) {
+          realPriceMap.set(b.ticker, { close: b.close, open: b.open, high: b.high, low: b.low })
+        }
+        for (const b of prevBarsRaw) {
+          if (!prevAdjMap.has(b.ticker)) {
+            prevAdjMap.set(b.ticker, { close: b.adj_close, open: b.adj_open, high: b.adj_high, low: b.adj_low })
+          }
+          if (!prevRealMap.has(b.ticker)) {
+            prevRealMap.set(b.ticker, { close: b.close })
+          }
         }
       }
 
@@ -143,7 +156,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       }
 
       const getReversal = (row: any): string => {
-        const prev = prevOHLCMap.get(row.ticker)
+        const prev = prevAdjMap.get(row.ticker)
         if (!prev) return ''
         if (!row.bullish && prev.close > prev.open && row.close < prev.low) return 'Bearish'
         if (row.bullish && prev.close < prev.open && row.close > prev.high) return 'Bullish'
@@ -152,15 +165,23 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
 
       return NextResponse.json({
         count: rows.length,
-        results: rows.map((r: any) => ({
-          ticker: r.ticker, sector: r.sector || 'Others',
-          price: r.price, ema20: r.ema20, ema50: r.ema50, ema200: r.ema200,
-          pct_ema20: r.pct_ema20, pct_ema50: r.pct_ema50, pct_ema200: r.pct_ema200,
-          rsi14: r.rsi14, vol_ratio: r.vol_ratio, bullish: r.bullish, signal: r.signal,
-          change_pct: (() => { const prev = closeMap.get(r.ticker); return prev != null ? ((r.price - prev) / prev * 100) : null })(),
-          reversal: getReversal(r),
-          trend: getTrend(r),
-        })),
+        results: rows.map((r: any) => {
+          const real = realPriceMap.get(r.ticker)
+          const prevReal = prevRealMap.get(r.ticker)
+          const realClose = real?.close ?? r.price
+          const realChangePct = prevReal ? ((realClose - prevReal.close) / prevReal.close * 100) : null
+          return {
+            ticker: r.ticker, sector: r.sector || 'Others',
+            price: realClose,
+            open: real?.open, high: real?.high, low: real?.low,
+            ema20: r.ema20, ema50: r.ema50, ema200: r.ema200,
+            pct_ema20: r.pct_ema20, pct_ema50: r.pct_ema50, pct_ema200: r.pct_ema200,
+            rsi14: r.rsi14, vol_ratio: r.vol_ratio, bullish: r.bullish, signal: r.signal,
+            change_pct: realChangePct != null ? Math.round(realChangePct * 100) / 100 : null,
+            reversal: getReversal(r),
+            trend: getTrend(r),
+          }
+        }),
       })
     }
 
