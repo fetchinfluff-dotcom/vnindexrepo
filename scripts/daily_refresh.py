@@ -116,7 +116,7 @@ def compute_enhanced_features(tdf, ticker):
     macro_bull = bool(r['close'] > r['ema200']) and bool(r['ema50'] > r['ema200'])
     momentum = bool(r['close'] > r['ema20'])
     vol_ok = not np.isnan(r['vol_ratio']) and r['vol_ratio'] > 1.0
-    sig = macro_bull and momentum and vol_ok and r['bullish']
+    sig = bool(macro_bull and momentum and vol_ok and bool(r['bullish']))
     feat = {
         'ticker': ticker, 'sector': TICKER_SECTOR.get(ticker, 'Others'),
         'date': str(tdf['date'].max()), 'price': float(r['close']),
@@ -126,7 +126,7 @@ def compute_enhanced_features(tdf, ticker):
         'rsi14': float(r['rsi14']) if not np.isnan(r['rsi14']) else 0,
         'atr14': float(r['atr14']) if not np.isnan(r['atr14']) else 0,
         'vol_ratio': float(r['vol_ratio']) if not np.isnan(r['vol_ratio']) else 0,
-        'bullish': bool(r['bullish']), 'signal': sig,
+        'bullish': bool(r['bullish']), 'signal': bool(sig),
         'pct_ema20': float((r['close']/r['ema20']-1)*100),
         'pct_ema50': float((r['close']/r['ema50']-1)*100),
         'pct_ema200': float((r['close']/r['ema200']-1)*100),
