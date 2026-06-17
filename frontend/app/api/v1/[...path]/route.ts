@@ -138,7 +138,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       }
 
       const getReversal = (row: any): string => {
-        const prev = prevOHLCMap.get(row.ticker)
+        const prev = prevOHLCMap.get(row.ticker) as { close: number; open: number; high: number } | undefined
         if (!prev) return ''
         if (!row.bullish && prev.close > prev.open && row.close < prev.low) return 'Bearish'
         if (row.bullish && prev.close < prev.open && row.close > prev.high) return 'Bullish'
