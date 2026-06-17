@@ -189,7 +189,10 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
 
     if (path === 'trades') {
       const limit = Number(url.searchParams.get('limit')) || 500
-      const rows = await restGet('bt_trades', { order: 'entry_date.desc', limit: String(limit) })
+      const params: Record<string, string> = { order: 'entry_date.desc', limit: String(limit) }
+      const minDate = url.searchParams.get('min_date')
+      if (minDate) params['entry_date'] = `gte.${minDate}`
+      const rows = await restGet('bt_trades', params)
       return NextResponse.json(rows)
     }
 
