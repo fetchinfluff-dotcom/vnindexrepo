@@ -1,9 +1,5 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
-  "framework": "nextjs",
-  "environment": {
-    "SUPABASE_URL": "https://xgbficilqacfnzrbftoo.supabase.co",
-    "SUPABASE_SERVICE_KEY": "@supabase_service_key"
-  }
+  "framework": "nextjs"
 }
