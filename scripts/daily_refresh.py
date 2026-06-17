@@ -49,13 +49,32 @@ VN100_TICKERS = [
     "SAB","VJC","HVN","PLP","PET","PJT","GTN","HAX",
 ]
 
+last_fetch = 0.0
+
 def fetch_vnstock(ticker):
+    import time
+    global last_fetch
     from vnstock.api.quote import Quote
-    q = Quote(symbol="VCB", source="VCI")
     end = datetime.now()
     start = end - timedelta(days=750)
-    raw = q.history(symbol=ticker, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval="1D")
-    if raw is None or raw.empty: return pd.DataFrame()
+    for attempt in range(3):
+        elapsed = time.time() - last_fetch
+        if elapsed < 4.0: time.sleep(4.0 - elapsed)
+        try:
+            q = Quote(symbol="VCB", source="VCI")
+            raw = q.history(symbol=ticker, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval="1D")
+            last_fetch = time.time()
+            if raw is None or raw.empty: return pd.DataFrame()
+            break
+        except Exception as e:
+            last_fetch = time.time()
+            if "rate limit" in str(e).lower() or "giới hạn" in str(e).lower():
+                wait = 20 + 20 * attempt
+                print(f"  rate limited on {ticker}, waiting {wait}s...")
+                time.sleep(wait)
+            else:
+                if attempt == 2: raise
+                time.sleep(5 * (attempt + 1))
     df = raw.copy()
     df.columns = [str(c).lower().strip() for c in df.columns]
     if "time" in df.columns and "date" not in df.columns: df = df.rename(columns={"time": "date"})
