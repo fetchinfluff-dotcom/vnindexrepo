@@ -128,7 +128,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       const closeMap = new Map(prevBars.map((b: any) => [b.ticker, b.close]))
       const prevOHLCMap = new Map(prev2Bars.map((b: any) => [b.ticker, b]))
 
-      function getTrend(row: any): string {
+      const getTrend = (row: any): string => {
         const { price, ema20, ema50, ema200 } = row
         if (price > ema20 && ema20 > ema50 && ema50 > ema200) return 'Mạnh'
         if (price > ema20 && ema20 > ema50) return 'Tăng'
@@ -137,7 +137,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
         return 'Đi ngang'
       }
 
-      function getReversal(row: any): string {
+      const getReversal = (row: any): string => {
         const prev = prevOHLCMap.get(row.ticker)
         if (!prev) return ''
         if (!row.bullish && prev.close > prev.open && row.close < prev.low) return 'Bearish'
