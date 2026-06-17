@@ -118,15 +118,16 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
 
       const rows = await restGet('stock_features', { select: '*', and: `(${filters.join(',')})`, order: 'ticker.asc' })
 
-      const dateRows = await restGet('daily_bars_adjusted', { select: 'date', order: 'date.desc', limit: '2' })
-      const dates = dateRows.map((d: any) => d.date)
-      const yesterday = dates[1]
-      const [prevBars, prev2Bars] = await Promise.all([
-        yesterday ? restGet('daily_bars_adjusted', { select: 'ticker,close', date: `eq.${yesterday}`, order: 'ticker.asc' }) : [],
-        yesterday ? restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low', date: `eq.${yesterday}`, order: 'ticker.asc' }) : [],
-      ])
-      const closeMap = new Map(prevBars.map((b: any) => [b.ticker, b.close]))
-      const prevOHLCMap = new Map(prev2Bars.map((b: any) => [b.ticker, b]))
+      const today = rows[0]?.date
+      const allPrev = today ? await restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low', date: `lt.${today}`, order: 'date.desc,ticker.asc' }) : []
+      const closeMap = new Map<number | string, number>()
+      const prevOHLCMap = new Map<number | string, { close: number; open: number; high: number; low: number }>()
+      for (const b of allPrev) {
+        if (!closeMap.has(b.ticker)) {
+          closeMap.set(b.ticker, b.close)
+          prevOHLCMap.set(b.ticker, b)
+        }
+      }
 
       const getTrend = (row: any): string => {
         const { price, ema20, ema50, ema200 } = row
@@ -138,7 +139,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       }
 
       const getReversal = (row: any): string => {
-        const prev = prevOHLCMap.get(row.ticker) as { close: number; open: number; high: number; low: number } | undefined
+        const prev = prevOHLCMap.get(row.ticker)
         if (!prev) return ''
         if (!row.bullish && prev.close > prev.open && row.close < prev.low) return 'Bearish'
         if (row.bullish && prev.close < prev.open && row.close > prev.high) return 'Bullish'
@@ -152,7 +153,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
           price: r.price, ema20: r.ema20, ema50: r.ema50, ema200: r.ema200,
           pct_ema20: r.pct_ema20, pct_ema50: r.pct_ema50, pct_ema200: r.pct_ema200,
           rsi14: r.rsi14, vol_ratio: r.vol_ratio, bullish: r.bullish, signal: r.signal,
-          change_pct: (() => { const prev = closeMap.get(r.ticker) as number | undefined; return prev != null ? ((r.price - prev) / prev * 100) : null })(),
+          change_pct: (() => { const prev = closeMap.get(r.ticker); return prev != null ? ((r.price - prev) / prev * 100) : null })(),
           reversal: getReversal(r),
           trend: getTrend(r),
         })),
