@@ -19,6 +19,16 @@ async function restGet(table: string, params: Record<string, string> = {}) {
   return res.json()
 }
 
+async function restCount(table: string, filter: string = '') {
+  const h = { ...HEADERS, 'Prefer': 'count=exact' }
+  const url = `${REST_URL}/${table}?select=ticker&limit=1${filter ? '&' + filter : ''}`
+  const res = await fetch(url, { headers: h })
+  if (!res.ok) throw new Error(`DB ${res.status}: ${await res.text()}`)
+  const range = res.headers.get('content-range') || ''
+  const match = range.match(/\/(\d+)$/)
+  return match ? parseInt(match[1], 10) : 0
+}
+
 async function restPost(table: string, body: any) {
   const res = await fetch(`${REST_URL}/${table}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(body) })
   if (!res.ok) throw new Error(`DB ${res.status}: ${await res.text()}`)
@@ -37,15 +47,8 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
     const url = new URL(request.url)
 
     if (path === 'dashboard') {
-      const [bars, tickers, dateRes, signalsRes] = await Promise.all([
-        restGet('daily_bars_adjusted', { select: 'count', head: 'true' }),
-        restGet('daily_bars_adjusted', { select: 'ticker', head: 'true', distinct: 'ticker' }),
-        restGet('daily_bars_adjusted', { select: 'date', order: 'date.desc', limit: '1' }),
-        restGet('daily_signals', { select: 'count', date: `eq.${new Date().toISOString().split('T')[0]}`, head: 'true' }),
-      ])
+      const dateRes = await restGet('daily_bars_adjusted', { select: 'date', order: 'date.desc', limit: '1' })
       return NextResponse.json({
-        total_bars: Array.isArray(bars) ? bars.length : 0,
-        active_tickers: Array.isArray(tickers) ? tickers.length : 0,
         last_data_date: dateRes?.[0]?.date || null,
         initial_capital: 1_000_000_000,
         max_positions: 7,
