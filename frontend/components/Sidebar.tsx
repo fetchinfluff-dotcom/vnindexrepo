@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Signal, Filter, Briefcase, Eye, Bell, History, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Signal, Filter, Briefcase, Eye, Bell, History, RefreshCw, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 
 const NAV_ITEMS = [
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/watchlist', label: 'Theo dõi', icon: Eye },
   { href: '/alerts', label: 'Cảnh báo', icon: Bell },
   { href: '/trades', label: 'Lịch sử', icon: History },
+  { href: '/sync', label: 'Đồng bộ', icon: RefreshCw },
 ]
 
 export default function Sidebar() {

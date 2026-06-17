@@ -97,17 +97,19 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
 
     if (path === 'screener') {
       const trend = url.searchParams.get('trend') || 'all'
-      const volMin = Number(url.searchParams.get('vol_ratio_min')) || 0
       const rsiMin = Number(url.searchParams.get('rsi_min')) || 0
       const rsiMax = Number(url.searchParams.get('rsi_max')) || 100
       const candle = url.searchParams.get('candle') || 'all'
       const sector = url.searchParams.get('sector') || 'all'
       const priceMin = Number(url.searchParams.get('price_min')) || 0
       const priceMax = Number(url.searchParams.get('price_max')) || 1_000_000
+      const signalFilter = url.searchParams.get('signal') || 'all'
+      const reversalFilter = url.searchParams.get('reversal') || 'all'
+      const trendLabel = url.searchParams.get('trend_label') || 'all'
 
       const filters: string[] = [
         `price.gte.${priceMin}`, `price.lte.${priceMax}`,
-        `rsi14.gte.${rsiMin}`, `rsi14.lte.${rsiMax}`, `vol_ratio.gte.${volMin}`,
+        `rsi14.gte.${rsiMin}`, `rsi14.lte.${rsiMax}`,
       ]
       if (trend === 'above_ema20') filters.push('close.gt.ema20')
       if (trend === 'above_ema50') filters.push('close.gt.ema50')
@@ -115,6 +117,8 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       if (candle === 'bullish') filters.push('bullish.is.true')
       if (candle === 'bearish') filters.push('bullish.is.false')
       if (sector !== 'all') filters.push(`sector.eq.${sector}`)
+      if (signalFilter === 'has_signal') filters.push('signal.is.true')
+      if (signalFilter === 'no_signal') filters.push('signal.is.false')
 
       const rows = await restGet('stock_features', { select: '*', and: `(${filters.join(',')})`, order: 'ticker.asc' })
 
@@ -166,8 +170,21 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
     }
 
     if (path === 'watchlist') {
-      const rows = await restGet('watchlist', { order: 'ticker.asc' })
+      const listName = url.searchParams.get('list_name') || ''
+      const params: Record<string, string> = { order: 'ticker.asc' }
+      if (listName) params['list_name'] = `eq.${listName}`
+      const rows = await restGet('watchlist', params)
       return NextResponse.json(rows)
+    }
+    if (path === 'watchlist/lists') {
+      const rows = await restGet('watchlist', { select: 'list_name', order: 'list_name.asc' })
+      const names = Array.from(new Set(rows.map((r: any) => r.list_name || 'default'))) as string[]
+      const counts: Record<string, number> = {}
+      for (const r of rows) {
+        const k = r.list_name || 'default'
+        counts[k] = (counts[k] || 0) + 1
+      }
+      return NextResponse.json(names.map((n: string) => ({ name: n, count: counts[n] || 0 })))
     }
 
     if (path === 'trades') {
@@ -179,6 +196,18 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
     if (path === 'alerts/config') {
       const rows = await restGet('alert_config', { limit: '1' })
       return NextResponse.json(rows?.[0] || {})
+    }
+
+    if (path === 'sync') {
+      const ghPat = process.env.GH_PAT || ''
+      if (!ghPat) return NextResponse.json({ error: 'Sync not configured' }, { status: 500 })
+      const res = await fetch('https://api.github.com/repos/fetchinfluff-dotcom/vnindexrepo/actions/workflows/daily_refresh.yml/dispatches', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${ghPat}`, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json', 'User-Agent': 'vnindex' },
+        body: JSON.stringify({ ref: 'main' }),
+      })
+      if (!res.ok) return NextResponse.json({ error: 'GitHub API error' }, { status: 500 })
+      return NextResponse.json({ status: 'triggered', message: 'Đã kích hoạt đồng bộ dữ liệu. Quá trình này mất ~1-3 phút.' })
     }
 
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
