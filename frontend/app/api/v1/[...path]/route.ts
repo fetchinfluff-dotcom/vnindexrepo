@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || ''
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
+const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`
 const HEADERS: Record<string, string> = {
@@ -9,6 +10,7 @@ const HEADERS: Record<string, string> = {
   'Accept': 'application/json',
 }
 if (SUPABASE_KEY) HEADERS['Authorization'] = `Bearer ${SUPABASE_KEY}`
+if (SUPABASE_ANON) HEADERS['apikey'] = SUPABASE_ANON
 
 async function restGet(table: string, params: Record<string, string> = {}) {
   const qs = new URLSearchParams(params).toString()
