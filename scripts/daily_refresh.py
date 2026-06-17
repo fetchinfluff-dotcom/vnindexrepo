@@ -48,12 +48,18 @@ VN100_TICKERS = [
     "SAB","VJC","HVN","PLP","PET","PJT","GTN","HAX",
 ]
 
+_last_fetch_time = 0.0
+
 def fetch_vnstock(ticker, start_date):
+    global _last_fetch_time
     from vnstock.api.quote import Quote
     end = datetime.now()
     for attempt in range(3):
+        elapsed = time.time() - _last_fetch_time
+        if elapsed < 3.5: time.sleep(3.5 - elapsed)
         try:
             q = Quote(symbol=ticker, source="VCI")
+            _last_fetch_time = time.time()
             raw = q.history(symbol=ticker, start=start_date, end=end.strftime("%Y-%m-%d"), interval="1D")
             if raw is None or raw.empty: return pd.DataFrame()
             break
