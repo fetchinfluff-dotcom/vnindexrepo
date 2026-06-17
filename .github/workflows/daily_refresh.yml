@@ -1,0 +1,23 @@
+name: Daily Refresh VN100
+
+on:
+  schedule:
+    - cron: '30 8 * * 1-5'  # 15:30 VN (UTC+7 = 08:30 UTC), Mon-Fri
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install vnstock pandas numpy httpx
+
+      - name: Daily VN100 refresh & compute signals
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/daily_refresh.py

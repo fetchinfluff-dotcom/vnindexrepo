@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 217 33% 17%;
+    --card-foreground: 210 40% 98%;
+    --primary: 142 72% 49%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 25%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 20%;
+    --muted-foreground: 215 20% 75%;
+    --accent: 142 72% 49%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --border: 217 33% 25%;
+  }
+}
+
+* { border-color: hsl(var(--border)); }
+body { background: hsl(var(--background)); color: hsl(var(--foreground)); }
+
+@layer components {
+  .card { @apply bg-card rounded-xl border border-border p-4; }
+  .btn { @apply px-4 py-2 rounded-lg font-medium transition-all; }
+  .btn-primary { @apply bg-primary text-primary-foreground hover:brightness-110; }
+  .btn-secondary { @apply bg-secondary text-secondary-foreground hover:brightness-110; }
+  .btn-danger { @apply bg-destructive text-white hover:brightness-110; }
+  .btn-outline { @apply border border-border hover:bg-secondary; }
+  .badge { @apply px-2 py-0.5 rounded-full text-xs font-medium; }
+  .badge-buy { @apply badge bg-buy/20 text-buy; }
+  .badge-sell { @apply badge bg-sell/20 text-sell; }
+  .badge-neutral { @apply badge bg-neutral/20 text-neutral; }
+  .input-field { @apply bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary; }
+}
