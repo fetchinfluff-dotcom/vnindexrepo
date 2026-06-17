@@ -117,6 +117,34 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       if (sector !== 'all') filters.push(`sector.eq.${sector}`)
 
       const rows = await restGet('stock_features', { select: '*', and: `(${filters.join(',')})`, order: 'ticker.asc' })
+
+      const dateRows = await restGet('daily_bars_adjusted', { select: 'date', order: 'date.desc', limit: '2' })
+      const dates = dateRows.map((d: any) => d.date)
+      const yesterday = dates[1]
+      const [prevBars, prev2Bars] = await Promise.all([
+        yesterday ? restGet('daily_bars_adjusted', { select: 'ticker,close', date: `eq.${yesterday}`, order: 'ticker.asc' }) : [],
+        yesterday ? restGet('daily_bars_adjusted', { select: 'ticker,close,open,high', date: `eq.${yesterday}`, order: 'ticker.asc' }) : [],
+      ])
+      const closeMap = new Map(prevBars.map((b: any) => [b.ticker, b.close]))
+      const prevOHLCMap = new Map(prev2Bars.map((b: any) => [b.ticker, b]))
+
+      function getTrend(row: any): string {
+        const { price, ema20, ema50, ema200 } = row
+        if (price > ema20 && ema20 > ema50 && ema50 > ema200) return 'Mạnh'
+        if (price > ema20 && ema20 > ema50) return 'Tăng'
+        if (price < ema20 && ema20 < ema50 && ema50 < ema200) return 'Giảm mạnh'
+        if (price < ema20 && ema20 < ema50) return 'Giảm'
+        return 'Đi ngang'
+      }
+
+      function getReversal(row: any): string {
+        const prev = prevOHLCMap.get(row.ticker)
+        if (!prev) return ''
+        if (!row.bullish && prev.close > prev.open && row.close < prev.low) return 'Bearish'
+        if (row.bullish && prev.close < prev.open && row.close > prev.high) return 'Bullish'
+        return ''
+      }
+
       return NextResponse.json({
         count: rows.length,
         results: rows.map((r: any) => ({
@@ -124,6 +152,9 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
           price: r.price, ema20: r.ema20, ema50: r.ema50, ema200: r.ema200,
           pct_ema20: r.pct_ema20, pct_ema50: r.pct_ema50, pct_ema200: r.pct_ema200,
           rsi14: r.rsi14, vol_ratio: r.vol_ratio, bullish: r.bullish, signal: r.signal,
+          change_pct: closeMap.has(r.ticker) && closeMap.get(r.ticker) ? ((r.price - closeMap.get(r.ticker)) / closeMap.get(r.ticker) * 100) : null,
+          reversal: getReversal(r),
+          trend: getTrend(r),
         })),
       })
     }

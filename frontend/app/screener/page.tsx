@@ -68,6 +68,9 @@ export default function ScreenerPage() {
                   <th className="text-left py-2">Mã</th>
                   <th className="text-left py-2">Ngành</th>
                   <th className="text-right py-2">Giá</th>
+                  <th className="text-right py-2">Thay đổi</th>
+                  <th className="text-center py-2">Xu hướng</th>
+                  <th className="text-center py-2">Đảo chiều</th>
                   <th className="text-right py-2">EMA20</th>
                   <th className="text-right py-2">EMA50</th>
                   <th className="text-right py-2">EMA200</th>
@@ -75,6 +78,7 @@ export default function ScreenerPage() {
                   <th className="text-right py-2">Vol</th>
                   <th className="text-center py-2">Nến</th>
                   <th className="text-center py-2">Signal</th>
+                  <th className="text-center py-2">Chart</th>
                 </tr>
               </thead>
               <tbody>
@@ -83,6 +87,9 @@ export default function ScreenerPage() {
                     <td className={`py-2 font-medium ${r.signal ? 'text-buy' : ''}`}>{r.ticker}</td>
                     <td className="py-2 text-muted-foreground">{r.sector}</td>
                     <td className="py-2 text-right">{fmt(r.price)}</td>
+                    <td className={`py-2 text-right ${r.change_pct != null ? (r.change_pct > 0 ? 'text-buy' : 'text-sell') : ''}`}>{r.change_pct != null ? fmtPct(r.change_pct) : '-'}</td>
+                    <td className="py-2 text-center">{trendBadge(r.trend)}</td>
+                    <td className="py-2 text-center">{r.reversal ? <span className={r.reversal === 'Bullish' ? 'text-buy' : 'text-sell'}>{r.reversal === 'Bullish' ? '🟢' : '🔴'} {r.reversal}</span> : '-'}</td>
                     <td className={`py-2 text-right ${r.pct_ema20 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema20)}</td>
                     <td className={`py-2 text-right ${r.pct_ema50 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema50)}</td>
                     <td className={`py-2 text-right ${r.pct_ema200 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema200)}</td>
@@ -90,6 +97,9 @@ export default function ScreenerPage() {
                     <td className="py-2 text-right">{r.vol_ratio?.toFixed(1) || '-'}x</td>
                     <td className="py-2 text-center">{r.bullish ? '🟢' : '🔴'}</td>
                     <td className="py-2 text-center">{r.signal ? <span className="badge-buy">BUY</span> : '-'}</td>
+                    <td className="py-2 text-center">
+                      <a href={`https://www.tradingview.com/chart/?symbol=HOSE:${r.ticker}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm">Mở</a>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -99,6 +109,17 @@ export default function ScreenerPage() {
       </div>
     </div>
   )
+}
+
+function trendBadge(trend: string) {
+  const colors: Record<string, string> = {
+    'Mạnh': 'text-buy font-bold',
+    'Tăng': 'text-buy',
+    'Đi ngang': 'text-muted-foreground',
+    'Giảm': 'text-sell',
+    'Giảm mạnh': 'text-sell font-bold',
+  }
+  return <span className={colors[trend] || ''}>{trend}</span>
 }
 
 function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: {v:string;l:string}[] }) {
