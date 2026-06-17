@@ -1,5 +1,5 @@
 """GitHub Actions: daily VN100 refresh + signal computation"""
-import os, json, asyncio
+import os, json, asyncio, time
 import pandas as pd
 import numpy as np
 import httpx
@@ -10,7 +10,6 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 REST_URL = f"{SUPABASE_URL}/rest/v1"
 HEADERS = {"Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json", "Accept": "application/json"}
 
-# ---- helpers ----
 def np_ema(arr, s):
     n = len(arr); r = np.empty(n); r[:] = np.nan
     m = 2/(s+1); r[0] = arr[0] if n > 0 else 0
@@ -49,27 +48,19 @@ VN100_TICKERS = [
     "SAB","VJC","HVN","PLP","PET","PJT","GTN","HAX",
 ]
 
-last_fetch = 0.0
-
-def fetch_vnstock(ticker):
-    import time
-    global last_fetch
+def fetch_vnstock(ticker, start_date):
     from vnstock.api.quote import Quote
     end = datetime.now()
-    start = end - timedelta(days=750)
     for attempt in range(3):
-        elapsed = time.time() - last_fetch
-        if elapsed < 4.0: time.sleep(4.0 - elapsed)
         try:
-            q = Quote(symbol="VCB", source="VCI")
-            raw = q.history(symbol=ticker, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval="1D")
-            last_fetch = time.time()
+            q = Quote(symbol=ticker, source="VCI")
+            raw = q.history(symbol=ticker, start=start_date, end=end.strftime("%Y-%m-%d"), interval="1D")
             if raw is None or raw.empty: return pd.DataFrame()
             break
         except Exception as e:
-            last_fetch = time.time()
-            if "rate limit" in str(e).lower() or "giới hạn" in str(e).lower():
-                wait = 20 + 20 * attempt
+            em = str(e).lower()
+            if "rate limit" in em or "giới hạn" in em:
+                wait = 30 + 30 * attempt
                 print(f"  rate limited on {ticker}, waiting {wait}s...")
                 time.sleep(wait)
             else:
@@ -109,76 +100,178 @@ def compute_features(tdf):
     tdf['atr14']=at; tdf['vol_ratio']=vr; tdf['bullish']=bc
     return tdf
 
+def compute_enhanced_features(tdf, ticker):
+    """Compute features from a per-ticker dataframe, return the last row dict + signal."""
+    tdf = tdf.sort_values('date')
+    if len(tdf) < 250: return None
+    tdf = compute_features(tdf)
+    r = tdf.iloc[-1]
+    if pd.isna(r.get('ema200')): return None
+    macro_bull = bool(r['close'] > r['ema200']) and bool(r['ema50'] > r['ema200'])
+    momentum = bool(r['close'] > r['ema20'])
+    vol_ok = not np.isnan(r['vol_ratio']) and r['vol_ratio'] > 1.0
+    sig = macro_bull and momentum and vol_ok and r['bullish']
+    feat = {
+        'ticker': ticker, 'sector': TICKER_SECTOR.get(ticker, 'Others'),
+        'date': str(tdf['date'].max()), 'price': float(r['close']),
+        'open': float(r['open']), 'high': float(r['high']), 'low': float(r['low']), 'close': float(r['close']),
+        'volume': int(r['volume']),
+        'ema20': float(r['ema20']), 'ema50': float(r['ema50']), 'ema200': float(r['ema200']),
+        'rsi14': float(r['rsi14']) if not np.isnan(r['rsi14']) else 0,
+        'atr14': float(r['atr14']) if not np.isnan(r['atr14']) else 0,
+        'vol_ratio': float(r['vol_ratio']) if not np.isnan(r['vol_ratio']) else 0,
+        'bullish': bool(r['bullish']), 'signal': sig,
+        'pct_ema20': float((r['close']/r['ema20']-1)*100),
+        'pct_ema50': float((r['close']/r['ema50']-1)*100),
+        'pct_ema200': float((r['close']/r['ema200']-1)*100),
+    }
+    signal = None
+    if sig:
+        signal = {
+            'date': str(tdf['date'].max()), 'ticker': ticker,
+            'signal_type': 'entry', 'reason': 'trend_momentum_volume_candle',
+            'strength': 1.0, 'price': float(r['close']),
+            'details': json.dumps({'regime': 'neutral'}),
+        }
+    return feat, signal, tdf
+
 async def main():
-    all_bars = []
-    for t in VN100_TICKERS:
-        try:
-            bars = fetch_vnstock(t)
-            if not bars.empty: all_bars.append(bars)
-            print(f"{t}: {len(bars)} bars")
-        except Exception as e:
-            print(f"{t}: error - {e}")
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
 
-    if not all_bars: return print("No data fetched")
-    df = pd.concat(all_bars, ignore_index=True)
-    print(f"Total: {len(df)} bars, dates: {df['date'].min()} to {df['date'].max()}")
+    # ---- Step 1: Check what data already exists in Supabase ----
+    print("Checking existing data in Supabase...")
+    async with httpx.AsyncClient(timeout=30) as c:
+        resp = await c.get(f"{REST_URL}/daily_bars_adjusted", headers=HEADERS,
+                           params={"select": "ticker,date", "order": "date.desc", "limit": 1})
+        latest = resp.json()
+        oldest_resp = await c.get(f"{REST_URL}/daily_bars_adjusted", headers=HEADERS,
+                                  params={"select": "ticker,date", "order": "date.asc", "limit": 1, "ticker": "eq.VCB"})
+    
+    latest_date = None
+    if isinstance(latest, list) and len(latest) > 0 and 'date' in latest[0]:
+        latest_date = latest[0]['date']
+    
+    if latest_date:
+        print(f"Latest data date in DB: {latest_date}")
+        # If we already have today's data, skip vnstock fetch
+        if latest_date >= today_str:
+            print("Data is already up-to-date. Skipping vnstock fetch, recomputing features from DB...")
+            # Load all existing data from Supabase for feature computation
+            all_existing = []
+            async with httpx.AsyncClient(timeout=120) as c:
+                for offset in range(0, 200000, 1000):
+                    resp = await c.get(f"{REST_URL}/daily_bars_adjusted", headers=HEADERS,
+                                       params={"select": "ticker,date,adj_open,adj_high,adj_low,adj_close,adj_volume",
+                                               "order": "ticker,date", "limit": 1000, "offset": offset})
+                    rows = resp.json()
+                    if not rows or not isinstance(rows, list) or len(rows) == 0: break
+                    all_existing.extend(rows)
+            if not all_existing:
+                print("No existing data found despite having latest_date")
+                return
+            df = pd.DataFrame(all_existing)
+            df = df.rename(columns={"adj_open":"open","adj_high":"high","adj_low":"low","adj_close":"close","adj_volume":"volume"})
+        else:
+            print(f"Need to fetch data from {latest_date} to {today_str}")
+            # ---- Step 2: Fetch only incremental data from vnstock ----
+            start_fetch = (datetime.strptime(latest_date, "%Y-%m-%d") - timedelta(days=10)).strftime("%Y-%m-%d")
+            new_bars = []
+            for idx, t in enumerate(VN100_TICKERS):
+                if idx > 0 and idx % 20 == 0:
+                    wait = 65
+                    print(f"  rate limit buffer: waiting {wait}s after {idx} tickers...")
+                    time.sleep(wait)
+                try:
+                    bars = fetch_vnstock(t, start_fetch)
+                    if not bars.empty: new_bars.append(bars)
+                    print(f"{t}: {len(bars)} bars")
+                except Exception as e:
+                    print(f"{t}: error - {e}")
+            if new_bars:
+                new_df = pd.concat(new_bars, ignore_index=True)
+                print(f"Fetched {len(new_df)} new bars from vnstock")
 
-    # Upsert daily_bars_adjusted via REST API (batch insert)
-    bars_records = df.to_dict(orient='records')
-    for b in bars_records:
-        b['adj_open'] = b.pop('open')
-        b['adj_high'] = b.pop('high')
-        b['adj_low'] = b.pop('low')
-        b['adj_close'] = b.pop('close')
-        b['adj_volume'] = b.pop('volume')
+                # ---- Step 3: Merge with existing data from Supabase ----
+                all_existing = []
+                async with httpx.AsyncClient(timeout=120) as c:
+                    for offset in range(0, 200000, 1000):
+                        resp = await c.get(f"{REST_URL}/daily_bars_adjusted", headers=HEADERS,
+                                           params={"select": "ticker,date,adj_open,adj_high,adj_low,adj_close,adj_volume",
+                                                   "order": "ticker,date", "limit": 1000, "offset": offset})
+                        rows = resp.json()
+                        if not rows or not isinstance(rows, list) or len(rows) == 0: break
+                        all_existing.extend(rows)
+                if all_existing:
+                    old_df = pd.DataFrame(all_existing)
+                    old_df = old_df.rename(columns={"adj_open":"open","adj_high":"high","adj_low":"low","adj_close":"close","adj_volume":"volume"})
+                    df = pd.concat([old_df, new_df], ignore_index=True)
+                    df = df.drop_duplicates(subset=["ticker","date"], keep="last").sort_values(["ticker","date"]).reset_index(drop=True)
+                else:
+                    df = new_df
 
-    # Batch upsert using POST with Prefer: resolution=merge-duplicates
-    async with httpx.AsyncClient(timeout=300) as c:
-        # Upsert in batches of 200
-        for i in range(0, len(bars_records), 200):
-            batch = bars_records[i:i+200]
-            await c.post(f"{REST_URL}/daily_bars_adjusted", json=batch, headers={**HEADERS, 'Prefer': 'resolution=merge-duplicates'})
-    print(f"daily_bars_adjusted: {len(bars_records)} rows upserted")
+                # ---- Step 4: Upsert merged daily bars to Supabase ----
+                upsert_records = df.to_dict(orient='records')
+                for b in upsert_records:
+                    b['adj_open'] = b.pop('open')
+                    b['adj_high'] = b.pop('high')
+                    b['adj_low'] = b.pop('low')
+                    b['adj_close'] = b.pop('close')
+                    b['adj_volume'] = b.pop('volume')
+                async with httpx.AsyncClient(timeout=300) as c:
+                    for i in range(0, len(upsert_records), 200):
+                        batch = upsert_records[i:i+200]
+                        await c.post(f"{REST_URL}/daily_bars_adjusted", json=batch,
+                                     headers={**HEADERS, 'Prefer': 'resolution=merge-duplicates'})
+                print(f"Upserted {len(upsert_records)} bars to daily_bars_adjusted")
+            else:
+                print("No new data fetched, using existing data")
+                return
+    else:
+        print("No existing data found. Fetching all data from vnstock (full history)...")
+        # First-time fetch: all tickers, all data
+        start_fetch = (now - timedelta(days=750)).strftime("%Y-%m-%d")
+        all_bars = []
+        for idx, t in enumerate(VN100_TICKERS):
+            if idx > 0 and idx % 20 == 0:
+                wait = 65
+                print(f"  rate limit buffer: waiting {wait}s after {idx} tickers...")
+                time.sleep(wait)
+            try:
+                bars = fetch_vnstock(t, start_fetch)
+                if not bars.empty: all_bars.append(bars)
+                print(f"{t}: {len(bars)} bars")
+            except Exception as e:
+                print(f"{t}: error - {e}")
+        if not all_bars: return print("No data fetched")
+        df = pd.concat(all_bars, ignore_index=True)
+        print(f"Total: {len(df)} bars")
+        # Upsert
+        upsert_records = df.to_dict(orient='records')
+        for b in upsert_records:
+            b['adj_open'] = b.pop('open'); b['adj_high'] = b.pop('high'); b['adj_low'] = b.pop('low')
+            b['adj_close'] = b.pop('close'); b['adj_volume'] = b.pop('volume')
+        async with httpx.AsyncClient(timeout=300) as c:
+            for i in range(0, len(upsert_records), 200):
+                batch = upsert_records[i:i+200]
+                await c.post(f"{REST_URL}/daily_bars_adjusted", json=batch,
+                             headers={**HEADERS, 'Prefer': 'resolution=merge-duplicates'})
+        print(f"Upserted {len(upsert_records)} bars")
 
-    # Compute features per ticker
-    last_date = df['date'].max()
+    # ---- Step 5: Compute features & signals per ticker ----
     features_list = []
     signals_list = []
     for t in VN100_TICKERS:
         tdf = df[df['ticker']==t].copy().sort_values('date')
-        if len(tdf) < 250: continue
-        tdf = compute_features(tdf)
-        r = tdf.iloc[-1]
-        if pd.isna(r.get('ema200')): continue
-        macro_bull = bool(r['close'] > r['ema200']) and bool(r['ema50'] > r['ema200'])
-        momentum = bool(r['close'] > r['ema20'])
-        vol_ok = not np.isnan(r['vol_ratio']) and r['vol_ratio'] > 1.0
-        sig = macro_bull and momentum and vol_ok and r['bullish']
-        features_list.append({
-            'ticker': t, 'sector': TICKER_SECTOR.get(t, 'Others'),
-            'date': str(last_date), 'price': float(r['close']),
-            'open': float(r['open']), 'high': float(r['high']), 'low': float(r['low']), 'close': float(r['close']),
-            'volume': int(r['volume']),
-            'ema20': float(r['ema20']), 'ema50': float(r['ema50']), 'ema200': float(r['ema200']),
-            'rsi14': float(r['rsi14']) if not np.isnan(r['rsi14']) else 0,
-            'atr14': float(r['atr14']) if not np.isnan(r['atr14']) else 0,
-            'vol_ratio': float(r['vol_ratio']) if not np.isnan(r['vol_ratio']) else 0,
-            'bullish': bool(r['bullish']), 'signal': sig,
-            'pct_ema20': float((r['close']/r['ema20']-1)*100),
-            'pct_ema50': float((r['close']/r['ema50']-1)*100),
-            'pct_ema200': float((r['close']/r['ema200']-1)*100),
-        })
-        if sig:
-            signals_list.append({
-                'date': str(last_date), 'ticker': t,
-                'signal_type': 'entry', 'reason': 'trend_momentum_volume_candle',
-                'strength': 1.0, 'price': float(r['close']),
-                'details': json.dumps({'regime': 'neutral'}),
-            })
+        result = compute_enhanced_features(tdf, t)
+        if result is None: continue
+        feat, sig, _ = result
+        features_list.append(feat)
+        if sig: signals_list.append(sig)
 
     print(f"Features: {len(features_list)}, Signals: {len(signals_list)}")
 
-    # Upsert stock_features (upsert by ticker using POST with merge-duplicates)
+    # Upsert stock_features
     async with httpx.AsyncClient(timeout=120) as c:
         for i in range(0, len(features_list), 100):
             batch = features_list[i:i+100]
