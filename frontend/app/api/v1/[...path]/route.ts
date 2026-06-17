@@ -152,7 +152,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
           price: r.price, ema20: r.ema20, ema50: r.ema50, ema200: r.ema200,
           pct_ema20: r.pct_ema20, pct_ema50: r.pct_ema50, pct_ema200: r.pct_ema200,
           rsi14: r.rsi14, vol_ratio: r.vol_ratio, bullish: r.bullish, signal: r.signal,
-          change_pct: closeMap.has(r.ticker) && closeMap.get(r.ticker) ? ((r.price - closeMap.get(r.ticker)) / closeMap.get(r.ticker) * 100) : null,
+          change_pct: (() => { const prev = closeMap.get(r.ticker) as number | undefined; return prev != null ? ((r.price - prev) / prev * 100) : null })(),
           reversal: getReversal(r),
           trend: getTrend(r),
         })),
