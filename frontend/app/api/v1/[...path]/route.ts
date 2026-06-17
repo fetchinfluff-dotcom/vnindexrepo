@@ -106,15 +106,15 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       const priceMax = Number(url.searchParams.get('price_max')) || 1_000_000
 
       const filters: string[] = [
-        `price=gte.${priceMin}`, `price=lte.${priceMax}`,
-        `rsi14=gte.${rsiMin}`, `rsi14=lte.${rsiMax}`, `vol_ratio=gte.${volMin}`,
+        `price.gte.${priceMin}`, `price.lte.${priceMax}`,
+        `rsi14.gte.${rsiMin}`, `rsi14.lte.${rsiMax}`, `vol_ratio.gte.${volMin}`,
       ]
-      if (trend === 'above_ema20') filters.push('close=gt.ema20')
-      if (trend === 'above_ema50') filters.push('close=gt.ema50')
-      if (trend === 'above_ema200') filters.push('close=gt.ema200')
-      if (candle === 'bullish') filters.push('bullish=eq.true')
-      if (candle === 'bearish') filters.push('bullish=eq.false')
-      if (sector !== 'all') filters.push(`sector=eq.${sector}`)
+      if (trend === 'above_ema20') filters.push('close.gt.ema20')
+      if (trend === 'above_ema50') filters.push('close.gt.ema50')
+      if (trend === 'above_ema200') filters.push('close.gt.ema200')
+      if (candle === 'bullish') filters.push('bullish.is.true')
+      if (candle === 'bearish') filters.push('bullish.is.false')
+      if (sector !== 'all') filters.push(`sector.eq.${sector}`)
 
       const rows = await restGet('stock_features', { select: '*', and: `(${filters.join(',')})`, order: 'ticker.asc' })
       return NextResponse.json({
