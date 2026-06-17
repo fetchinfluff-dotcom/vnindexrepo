@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+SUPABASE_ANON = os.environ.get("SUPABASE_ANON_KEY", "")
 REST_URL = f"{SUPABASE_URL}/rest/v1"
-HEADERS = {"Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json", "Accept": "application/json"}
+HEADERS = {"Authorization": f"Bearer {SUPABASE_KEY}", "apikey": SUPABASE_ANON, "Content-Type": "application/json", "Accept": "application/json"}
 
 def np_ema(arr, s):
     n = len(arr); r = np.empty(n); r[:] = np.nan
