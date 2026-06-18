@@ -9,6 +9,22 @@
 - **Strategy**: Current simple strategy (EMA200/50/20 trend + momentum + volume + bullish candle) + **Codex Advise** multi-factor scoring (trend 25 + RS 20 + volume 15 + entry quality 25 + risk 15 = 100)
 - **Symbols**: VN100 universe, 1 tỷ VND capital, max DD ≤15%, max positions 7, sector cap 20%
 
+## Setup Commands
+
+```bash
+# Frontend
+cd frontend && npm install && npm run dev
+
+# Backend data refresh
+cd scripts && pip install -r ../requirements.txt && python daily_refresh.py
+
+# Type-check
+cd frontend && npx tsc --noEmit
+
+# Full build (must succeed before deploy)
+cd frontend && npm run build
+```
+
 ## Critical Context (read before any edit)
 
 ### Supabase REST API
@@ -26,6 +42,7 @@
 
 ### Arch & Deployment
 - **Vercel root directory** = `frontend/` (NOT repo root)
+- **Deploy**: push to `main` → Vercel auto-deploys (~1-2 min build)
 - **No Render / no Python backend** — Next.js API routes replace FastAPI
 - **Single-user, no auth**
 
@@ -72,26 +89,41 @@ Any change to strategy logic MUST reference and match the corresponding spec doc
 3. **No comments** in code unless required by spec
 4. **Vietnamese UI labels** for all user-facing text
 5. **booleans in Supabase**: use `is.true` / `is.false` in REST params
+6. **Secrets never in code**: use `.env` for local, GitHub Secrets for CI. Never commit actual secret values.
+7. **Build must pass**: always run `npm run build` before pushing
+
+## Deploy Flow (MANDATORY)
+
+After any code change:
+1. Run `npm run build` (frontend) to verify
+2. Run `npx tsc --noEmit` to type-check
+3. `git add -A && git commit -m "<message>"`
+4. `git push origin main`
+5. Wait for Vercel auto-deploy (~1-2 min)
+6. **Do NOT ask for permission** — just commit, push, and deploy automatically unless explicitly told not to
+
+## Code Style
+- TypeScript strict mode
+- No semicolons in JSX attributes
+- Single quotes for strings
+- Avoid comments unless explaining non-obvious logic
+- Use existing patterns from neighboring files
 
 ## Verification Steps (run after any change)
 
 ```bash
-# Frontend type-check
-cd frontend
-npx tsc --noEmit
+# 1. Frontend build (catches type + compile errors)
+cd frontend && npm run build
 
-# Backend (manual recompute, requires .env)
-cd scripts
-python daily_refresh.py
+# 2. Type-check (catches type errors)
+cd frontend && npx tsc --noEmit
 
-# Verify reversal / trend logic
-python verify_reversal2.py
+# 3. Backend recompute (requires .env in scripts/)
+cd scripts && python daily_refresh.py
+
+# 4. Verify reversal / trend logic
+cd scripts && python verify_reversal2.py
 ```
-
-## Git Flow
-- Do NOT commit unless explicitly asked
-- Do NOT amend commits unless explicitly asked
-- Write commit messages matching repo style (English, concise)
 
 ## Codex Reversal (Section 7) — On-the-fly only
 - `codex_reversal` is NOT stored in DB — computed in API route via `getCodexReversal()`
@@ -101,3 +133,8 @@ python verify_reversal2.py
 - **Volume confirmation**: vol_ratio>=1.2 AND curVol > prevVol
 - Both need: volume_ok + rsi 40-65 + close >= ema50*0.97
 - Prior pullback/prior downswing conditions NOT implemented (missing historical low/high queries)
+
+## Security
+- Never commit actual PAT tokens or API keys to the repo
+- Use `.env.example` with placeholder values for reference
+- GitHub Push Protection will block commits containing secrets — amend and retry
