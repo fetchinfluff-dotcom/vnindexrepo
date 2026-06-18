@@ -1,11 +1,17 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
 import { RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
 
 export default function SyncPage() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [lastDate, setLastDate] = useState('2026-06-17')
+  useEffect(() => {
+    fetch('/api/v1/dashboard').then(r => r.json()).then(d => {
+      if (d.last_data_date) setLastDate(d.last_data_date)
+    }).catch(() => {})
+  }, [])
 
   const sync = async () => {
     setLoading(true)
@@ -43,7 +49,7 @@ export default function SyncPage() {
       <div className="card max-w-lg">
         <h3 className="font-semibold mb-2">Lịch sử đồng bộ</h3>
         <p className="text-xs text-muted-foreground">
-          Lần cuối: 2026-06-17 09:51 (GitHub Actions).<br />
+          Lần cuối: {lastDate} 15:30 (GitHub Actions).<br />
           Dữ liệu hiện tại: 122 cổ phiếu VN100, ~173k bar OHLCV.
         </p>
       </div>
