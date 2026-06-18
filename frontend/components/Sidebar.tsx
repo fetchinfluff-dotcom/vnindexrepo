@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Signal, Filter, Briefcase, Eye, Bell, History, RefreshCw, Menu, X } from 'lucide-react'
 import { useState } from 'react'
+import UpdateDate from './UpdateDate'
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -43,6 +44,7 @@ export default function Sidebar() {
         <div className="absolute bottom-4 left-4 right-4 p-4 rounded-lg bg-secondary/50">
           <p className="text-xs text-muted-foreground">Dữ liệu từ vnstock VCI</p>
           <p className="text-xs text-muted-foreground mt-1">Cập nhật: 15:30 VN</p>
+          <p className="text-xs text-muted-foreground mt-1"><UpdateDate /></p>
         </div>
       </aside>
     </>

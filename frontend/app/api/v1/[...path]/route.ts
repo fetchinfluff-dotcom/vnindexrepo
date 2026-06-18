@@ -106,6 +106,8 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       const signalFilter = url.searchParams.get('signal') || 'all'
       const reversalFilter = url.searchParams.get('reversal') || 'all'
       const trendLabel = url.searchParams.get('trend_label') || 'all'
+      const codexScoreMin = Number(url.searchParams.get('codex_score_min')) || 0
+      const codexScoreMax = Number(url.searchParams.get('codex_score_max')) || 100
 
       const filters: string[] = [
         `price.gte.${priceMin}`, `price.lte.${priceMax}`,
@@ -119,22 +121,25 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       if (sector !== 'all') filters.push(`sector.eq.${sector}`)
       if (signalFilter === 'has_signal') filters.push('signal.is.true')
       if (signalFilter === 'no_signal') filters.push('signal.is.false')
+      if (codexScoreMin > 0) filters.push(`codex_score.gte.${codexScoreMin}`)
+      if (codexScoreMax < 100) filters.push(`codex_score.lte.${codexScoreMax}`)
 
       const rows = await restGet('stock_features', { select: '*', and: `(${filters.join(',')})`, order: 'ticker.asc' })
 
       // Fetch raw + adjusted prices from daily_bars_adjusted for correct display
       // stock_features.price = adj_close (VCI-adjusted), but we show real market price
       const today = rows[0]?.date
-      let realPriceMap = new Map<string, { close: number; open: number; high: number; low: number }>()
+      let realPriceMap = new Map<string, { close: number; open: number; high: number; low: number; volume: number }>()
       let prevAdjMap = new Map<string, { close: number; open: number; high: number; low: number }>()
       let prevRealMap = new Map<string, { close: number }>()
+      let prevVolMap = new Map<string, number>()
       if (today) {
         const [latestBars, prevBarsRaw] = await Promise.all([
-          restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low', date: `eq.${today}` }),
-          restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low,adj_close,adj_open,adj_high,adj_low', date: `lt.${today}`, order: 'date.desc,ticker.asc' }),
+          restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low,volume', date: `eq.${today}` }),
+          restGet('daily_bars_adjusted', { select: 'ticker,close,open,high,low,volume,adj_close,adj_open,adj_high,adj_low', date: `lt.${today}`, order: 'date.desc,ticker.asc' }),
         ])
         for (const b of latestBars) {
-          realPriceMap.set(b.ticker, { close: b.close, open: b.open, high: b.high, low: b.low })
+          realPriceMap.set(b.ticker, { close: b.close, open: b.open, high: b.high, low: b.low, volume: b.volume || 0 })
         }
         for (const b of prevBarsRaw) {
           if (!prevAdjMap.has(b.ticker)) {
@@ -142,6 +147,9 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
           }
           if (!prevRealMap.has(b.ticker)) {
             prevRealMap.set(b.ticker, { close: b.close })
+          }
+          if (!prevVolMap.has(b.ticker)) {
+            prevVolMap.set(b.ticker, b.volume || 0)
           }
         }
       }
@@ -163,6 +171,41 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
         return ''
       }
 
+      const getCodexTrend = (row: any): string => {
+        const { price, ema20, ema50, ema100, ema200 } = row
+        if (price > ema50 && ema20 > ema50 && ema50 >= ema100 && price > ema200) return 'Mạnh'
+        if (price > ema50 && ema20 > ema50) return 'Tăng'
+        if (price < ema50 && ema20 < ema50 && ema50 < ema200) return 'Giảm mạnh'
+        if (price < ema50 && ema20 < ema50) return 'Giảm'
+        return 'Đi ngang'
+      }
+
+      const getCodexReversal = (row: any): string => {
+        const prev = prevAdjMap.get(row.ticker)
+        if (!prev) return ''
+        const rsi14 = row.rsi14; const volRatio = row.vol_ratio
+        const cp = row.close_position; const br = row.body_ratio
+        const close = row.price; const ema20 = row.ema20; const ema50 = row.ema50
+        const curVol = row.volume || 0; const prevVol = prevVolMap.get(row.ticker) || 0
+        // Section 7: Bullish Engulfing Body
+        const bullishEngulfing = Boolean(row.bullish && prev.close < prev.open &&
+          row.open <= prev.close && close >= prev.open && br >= 0.45 && cp >= 0.65)
+        // Section 7: Reclaim Candle
+        const reclaimCandle = Boolean(close > ema20 && row.low < ema20 && row.bullish &&
+          cp >= 0.7 && br >= 0.35)
+        // Section 7: Volume Confirmation
+        const revVol = volRatio >= 1.2 && curVol > prevVol
+        if ((bullishEngulfing || reclaimCandle) && revVol && rsi14 >= 40 && rsi14 <= 65 && close >= ema50 * 0.97) {
+          return 'Bullish'
+        }
+        // Section 8: Bearish Reversal
+        if (!row.bullish && prev.close > prev.open && row.open >= prev.close &&
+            close <= prev.open && br >= 0.45 && cp <= 0.35 && volRatio >= 1.2 && close < ema20) {
+          return 'Bearish'
+        }
+        return ''
+      }
+
       return NextResponse.json({
         count: rows.length,
         results: rows.map((r: any) => {
@@ -180,6 +223,13 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
             change_pct: realChangePct != null ? Math.round(realChangePct * 100) / 100 : null,
             reversal: getReversal(r),
             trend: getTrend(r),
+            codex_trend: getCodexTrend(r),
+            codex_reversal: getCodexReversal(r),
+            codex_score: r.codex_score ?? 0,
+            codex_signal: r.codex_signal ?? false,
+            codex_eligible: r.codex_eligible ?? false,
+            codex_rs_score: r.codex_rs_score ?? 0,
+            codex_rr: r.codex_rr ?? 1,
           }
         }),
       })

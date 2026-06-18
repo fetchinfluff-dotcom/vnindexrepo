@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
+import UpdateDate from '@/components/UpdateDate'
 
 export const metadata: Metadata = {
   title: 'VN100 Trading Dashboard',
@@ -16,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
         </main>
         <footer className="lg:ml-64 border-t border-border/50 px-4 lg:px-8 py-2 text-xs text-muted-foreground flex justify-between">
-          <span>Dữ liệu cập nhật: <span id="update-date">2026-06-17</span></span>
+          <UpdateDate />
           <span>VN100 Trading Dashboard v1.0</span>
         </footer>
       </body>

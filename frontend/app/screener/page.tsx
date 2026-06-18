@@ -16,17 +16,27 @@ export default function ScreenerPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [watchlistName, setWatchlistName] = useState('default')
-  const [filters, setFilters] = useState({
+  const [view, setView] = useState<'current' | 'codex'>('current')
+  const [filters, setFilters] = useState<any>({
     trend: 'all', rsi_min: 0, rsi_max: 100,
     candle: 'all', sector: 'all', price_min: 0, price_max: 1000000,
-    signal: 'all', reversal: 'all', trend_label: 'all',
+    signal: 'all', reversal: 'all', trend_label: 'all', codex_score: 'all',
   })
 
   const search = async () => {
     setLoading(true); setErr('')
     try {
       const params = new URLSearchParams()
-      Object.entries(filters).forEach(([k,v]) => params.set(k, String(v)))
+      Object.entries(filters).forEach(([k,v]) => {
+        if (v !== '' && v !== 'all') params.set(k, String(v))
+      })
+      if (view === 'codex') {
+        const cs = filters.codex_score
+        if (cs === 'gte_80') params.set('codex_score_min', '80')
+        else if (cs === 'gte_65') params.set('codex_score_min', '65')
+        else if (cs === 'gte_50') params.set('codex_score_min', '50')
+        else if (cs === 'lt_50') params.set('codex_score_max', '49')
+      }
       const res = await fetchAPI(`/screener?${params}`)
       setData(res)
     } catch (e: any) { setErr(e.message) }
@@ -45,7 +55,7 @@ export default function ScreenerPage() {
     const arr = [...data.results]
     arr.sort((a: any, b: any) => {
       let av = a[sortKey], bv = b[sortKey]
-      if (sortKey === 'change_pct' || sortKey === 'price' || sortKey === 'rsi14' || sortKey === 'vol_ratio') {
+      if (['change_pct','price','rsi14','vol_ratio','codex_score','codex_rs_score','codex_rr'].includes(sortKey)) {
         av = Number(av) || 0; bv = Number(bv) || 0
       } else {
         av = String(av || ''); bv = String(bv || '')
@@ -91,8 +101,12 @@ export default function ScreenerPage() {
     )
   }
 
-  const reversedRows = sorted.filter((r: any) => r.reversal)
+  const revFilter = filters.reversal
+  const reversedRows = sorted.filter((r: any) =>
+    view === 'codex' ? r.codex_reversal : r.reversal
+  )
   const signalRows = sorted.filter((r: any) => r.signal)
+  const codexRows = sorted.filter((r: any) => r.codex_signal)
 
   return (
     <div className="space-y-6">
@@ -102,6 +116,10 @@ export default function ScreenerPage() {
       </div>
 
       <div className="card">
+        <div className="flex items-center gap-2 mb-3">
+          <button onClick={() => setView('current')} className={`btn btn-sm ${view === 'current' ? 'btn-primary' : ''}`}>Chiến lược hiện tại</button>
+          <button onClick={() => setView('codex')} className={`btn btn-sm ${view === 'codex' ? 'btn-primary' : ''}`}>Codex Advise</button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           <FilterSelect label="Xu hướng EMA" value={filters.trend} onChange={(v) => setFilters({...filters, trend: v})}
             options={[
@@ -115,6 +133,10 @@ export default function ScreenerPage() {
             options={[{v:'all',l:'Tất cả'},{v:'has_signal',l:'Có signal'},{v:'no_signal',l:'Không signal'}]} />
           <FilterSelect label="Đảo chiều" value={filters.reversal} onChange={(v) => setFilters({...filters, reversal: v})}
             options={[{v:'all',l:'Tất cả'},{v:'bullish',l:'Bullish'},{v:'bearish',l:'Bearish'}]} />
+          {view === 'codex' && (
+            <FilterSelect label="Codex Score" value={filters.codex_score || 'all'} onChange={(v) => setFilters({...filters, codex_score: v})}
+              options={[{v:'all',l:'Tất cả'},{v:'gte_80',l:'≥ 80 (mạnh)'},{v:'gte_65',l:'≥ 65 (tốt)'},{v:'gte_50',l:'≥ 50 (theo dõi)'},{v:'lt_50',l:'< 50 (bỏ qua)'}]} />
+          )}
           <FilterInput label="RSI Min" value={filters.rsi_min} onChange={(v) => setFilters({...filters, rsi_min: v})} />
           <FilterInput label="RSI Max" value={filters.rsi_max} onChange={(v) => setFilters({...filters, rsi_max: v})} />
           <div className="flex items-end">
@@ -125,15 +147,37 @@ export default function ScreenerPage() {
         </div>
       </div>
 
+      {view === 'codex' && (
+        <div className="card bg-green-500/5 border border-green-500/20">
+          <p className="text-sm font-medium mb-2">📊 Codex Advise:
+            <span className="text-buy font-bold"> {sorted.filter((r:any)=>r.codex_score>=80).length} mạnh</span>
+            <span className="text-buy"> · {sorted.filter((r:any)=>r.codex_score>=65&&r.codex_score<80).length} tốt</span>
+            <span className="text-muted-foreground"> · {sorted.filter((r:any)=>r.codex_score>=50&&r.codex_score<65).length} theo dõi</span>
+            <span className="text-sell"> · {sorted.filter((r:any)=>r.codex_score<50).length} bỏ qua</span>
+            {codexRows.length > 0 && <span className="text-buy ml-3">· {codexRows.length} mua</span>}
+          </p>
+          {codexRows.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {codexRows.map((r: any) => (
+                <span key={r.ticker} className="text-xs px-2 py-1 rounded bg-buy/10 text-buy">
+                  {r.ticker} ({r.codex_score})
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {reversedRows.length > 0 && (
         <div className="card bg-yellow-500/5 border border-yellow-500/20">
-          <p className="text-sm font-medium mb-2">⚠ Cổ phiếu có tín hiệu đảo chiều ({reversedRows.length} mã):</p>
+          <p className="text-sm font-medium mb-2">⚠ Tín hiệu đảo chiều ({reversedRows.length} mã):</p>
           <div className="flex flex-wrap gap-2">
-            {reversedRows.map((r: any) => (
-              <span key={r.ticker} className={`text-xs px-2 py-1 rounded ${r.reversal === 'Bullish' ? 'bg-buy/10 text-buy' : 'bg-sell/10 text-sell'}`}>
-                {r.ticker} {r.reversal === 'Bullish' ? '🟢' : '🔴'}
+            {reversedRows.map((r: any) => {
+              const rev = view === 'codex' ? r.codex_reversal : r.reversal
+              return (
+              <span key={r.ticker} className={`text-xs px-2 py-1 rounded ${rev === 'Bullish' ? 'bg-buy/10 text-buy' : 'bg-sell/10 text-sell'}`}>
+                {r.ticker} {rev === 'Bullish' ? '🟢' : '🔴'}
               </span>
-            ))}
+            )})}
           </div>
         </div>
       )}
@@ -162,36 +206,65 @@ export default function ScreenerPage() {
                     <th className="text-left py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('sector')}>Ngành <SortIcon k="sector" /></th>
                     <Hdr k="price">Giá</Hdr>
                     <Hdr k="change_pct">% Change</Hdr>
-                    <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('trend')}>Xu hướng <SortIcon k="trend" /></th>
-                    <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('reversal')}>Đảo chiều <SortIcon k="reversal" /></th>
-                    <Hdr k="pct_ema20">EMA20</Hdr>
-                    <Hdr k="pct_ema50">EMA50</Hdr>
-                    <Hdr k="pct_ema200">EMA200</Hdr>
                     <Hdr k="rsi14">RSI</Hdr>
-                    <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('signal')}>Signal <SortIcon k="signal" /></th>
+                    {view === 'current' ? (
+                      <>
+                        <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('trend')}>Xu hướng <SortIcon k="trend" /></th>
+                        <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('reversal')}>Đảo chiều <SortIcon k="reversal" /></th>
+                        <Hdr k="pct_ema20">EMA20</Hdr>
+                        <Hdr k="pct_ema50">EMA50</Hdr>
+                        <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('signal')}>Signal <SortIcon k="signal" /></th>
+                      </>
+                      ) : (
+                        <>
+                          <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('codex_trend')}>C.Xu hướng <SortIcon k="codex_trend" /></th>
+                          <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('codex_reversal')}>C.Đảo chiều <SortIcon k="codex_reversal" /></th>
+                          <Hdr k="codex_score">Codex</Hdr>
+                          <Hdr k="codex_rs_score">RS</Hdr>
+                          <Hdr k="codex_rr">R:R</Hdr>
+                          <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('codex_eligible')}>Elig <SortIcon k="codex_eligible" /></th>
+                          <th className="text-center py-2 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('codex_signal')}>C.Advise <SortIcon k="codex_signal" /></th>
+                        </>
+                      )}
                     <th className="text-center py-2">Chart</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((r: any) => (
-                    <tr key={r.ticker} className={`border-b border-border/50 hover:bg-secondary/30 ${r.signal ? 'bg-buy/5' : ''}`}>
+                  {sorted.map((r: any) => {
+                    const sig = view === 'current' ? r.signal : r.codex_signal
+                    return (
+                    <tr key={r.ticker} className={`border-b border-border/50 hover:bg-secondary/30 ${sig ? 'bg-buy/5' : ''}`}>
                       <td className="py-2"><input type="checkbox" checked={selected.has(r.ticker)} onChange={() => toggleSelect(r.ticker)} className="w-4 h-4" /></td>
-                      <td className={`py-2 font-medium ${r.signal ? 'text-buy' : ''}`}>{r.ticker}</td>
+                      <td className={`py-2 font-medium ${sig ? 'text-buy' : ''}`}>{r.ticker}</td>
                       <td className="py-2 text-muted-foreground">{r.sector}</td>
                       <td className="py-2 text-right">{fmt(r.price)}</td>
                       <td className={`py-2 text-right ${r.change_pct != null ? (r.change_pct > 0 ? 'text-buy' : 'text-sell') : ''}`}>{r.change_pct != null ? fmtPct(r.change_pct) : '-'}</td>
-                      <td className="py-2 text-center">{trendBadge(r.trend)}</td>
-                      <td className="py-2 text-center">{r.reversal ? <span className={r.reversal === 'Bullish' ? 'text-buy' : 'text-sell'}>{r.reversal === 'Bullish' ? '🟢' : '🔴'} {r.reversal}</span> : '-'}</td>
-                      <td className={`py-2 text-right ${r.pct_ema20 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema20)}</td>
-                      <td className={`py-2 text-right ${r.pct_ema50 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema50)}</td>
-                      <td className={`py-2 text-right ${r.pct_ema200 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema200)}</td>
                       <td className="py-2 text-right">{r.rsi14?.toFixed(0) || '-'}</td>
-                      <td className="py-2 text-center">{r.signal ? <span className="badge-buy">BUY</span> : '-'}</td>
+                      {view === 'current' ? (
+                        <>
+                          <td className="py-2 text-center">{trendBadge(r.trend)}</td>
+                          <td className="py-2 text-center">{r.reversal ? <span className={r.reversal === 'Bullish' ? 'text-buy' : 'text-sell'}>{r.reversal === 'Bullish' ? '🟢' : '🔴'} {r.reversal}</span> : '-'}</td>
+                          <td className={`py-2 text-right ${r.pct_ema20 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema20)}</td>
+                          <td className={`py-2 text-right ${r.pct_ema50 > 0 ? 'text-buy' : 'text-sell'}`}>{fmtPct(r.pct_ema50)}</td>
+                          <td className="py-2 text-center">{r.signal ? <span className="badge-buy">BUY</span> : '-'}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-2 text-center">{trendBadge(r.codex_trend)}</td>
+                          <td className="py-2 text-center">{r.codex_reversal ? <span className={r.codex_reversal === 'Bullish' ? 'text-buy' : 'text-sell'}>{r.codex_reversal === 'Bullish' ? '🟢' : '🔴'} {r.codex_reversal}</span> : '-'}</td>
+                          <td className="py-2 text-right">{codexBadge(r.codex_score)}</td>
+                          <td className="py-2 text-right">{r.codex_rs_score || 0}</td>
+                          <td className="py-2 text-right">{(r.codex_rr || 1).toFixed(1)}</td>
+                          <td className="py-2 text-center">{r.codex_eligible ? <span className="text-buy">✓</span> : '-'}</td>
+                          <td className="py-2 text-center">{r.codex_signal ? <span className="badge-buy">BUY</span> : '-'}</td>
+                        </>
+                      )}
                       <td className="py-2 text-center">
                         <a href={`https://www.tradingview.com/chart/?symbol=HOSE:${r.ticker}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm">Mở</a>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -200,6 +273,14 @@ export default function ScreenerPage() {
       </div>
     </div>
   )
+}
+
+function codexBadge(score: number) {
+  if (!score) return <span className="text-muted-foreground">0</span>
+  if (score >= 80) return <span className="text-buy font-bold">{score}</span>
+  if (score >= 65) return <span className="text-buy">{score}</span>
+  if (score >= 50) return <span className="text-muted-foreground">{score}</span>
+  return <span className="text-sell">{score}</span>
 }
 
 function trendBadge(trend: string) {
