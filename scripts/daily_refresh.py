@@ -482,7 +482,7 @@ async def main():
             return
         df_bars_raw = pd.DataFrame(all_existing)
         df_bars_raw['real_close'] = df_bars_raw['close']
-        df = df_bars_raw.rename(columns={"adj_open":"open","adj_high":"high","adj_low":"low","adj_close":"close","adj_volume":"volume"})
+        df = df_bars_raw.drop(columns=['close']).rename(columns={"adj_open":"open","adj_high":"high","adj_low":"low","adj_close":"close","adj_volume":"volume"})
 
     # Normalize columns for feature computation:
     # open/high/low/close/volume should use adjusted values, real_close = raw close
