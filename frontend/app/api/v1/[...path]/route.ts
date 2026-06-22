@@ -148,10 +148,10 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
           if (!prevAdjMap.has(b.ticker)) {
             prevAdjMap.set(b.ticker, { close: b.adj_close, open: b.adj_open, high: b.adj_high, low: b.adj_low })
           }
-          if (!prevRealMap.has(b.ticker)) {
+          if (!prevRealMap.has(b.ticker) && b.close != null) {
             prevRealMap.set(b.ticker, { close: b.close })
           }
-          if (!prevVolMap.has(b.ticker)) {
+          if (!prevVolMap.has(b.ticker) && b.volume != null) {
             prevVolMap.set(b.ticker, b.volume || 0)
           }
         }
