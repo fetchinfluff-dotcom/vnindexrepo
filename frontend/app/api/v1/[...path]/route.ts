@@ -47,9 +47,12 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
     const url = new URL(request.url)
 
     if (path === 'dashboard') {
-      const dateRes = await restGet('daily_bars_adjusted', { select: 'date', order: 'date.desc', limit: '1' })
+      const [featDate, barDate] = await Promise.all([
+        restGet('stock_features', { select: 'date', order: 'date.desc', limit: '1' }),
+        restGet('daily_bars_adjusted', { select: 'date', order: 'date.desc', limit: '1' }),
+      ])
       return NextResponse.json({
-        last_data_date: dateRes?.[0]?.date || null,
+        last_data_date: featDate?.[0]?.date || barDate?.[0]?.date || null,
         initial_capital: 1_000_000_000,
         max_positions: 7,
         entry_frac: 0.07,

@@ -424,12 +424,21 @@ async def main():
                     df = new_df
                 # Upsert merged bars
                 upsert_records = df.to_dict(orient='records')
+                fail = 0
                 async with httpx.AsyncClient(timeout=300) as c:
                     for i in range(0, len(upsert_records), 200):
                         batch = upsert_records[i:i+200]
-                        await c.post(f"{REST_URL}/daily_bars_adjusted", json=batch,
-                                     headers={**HEADERS, 'Prefer': 'resolution=merge-duplicates'})
-                print(f"Upserted {len(upsert_records)} bars to daily_bars_adjusted")
+                        resp = await c.post(f"{REST_URL}/daily_bars_adjusted", json=batch,
+                                            headers={**HEADERS, 'Prefer': 'resolution=merge-duplicates'})
+                        if resp.status_code >= 400:
+                            fail += 1; print(f"  upsert batch {i//200} failed: {resp.status_code}")
+                if fail: print(f"Upserted {len(upsert_records)} bars ({fail} batches FAILED)")
+                else: print(f"Upserted {len(upsert_records)} bars to daily_bars_adjusted")
+                # Clean up rows with null close (corrupted by silent upsert failures)
+                async with httpx.AsyncClient(timeout=60) as c:
+                    resp = await c.delete(f"{REST_URL}/daily_bars_adjusted?close=is.null&date=gte.2026-06-10",
+                                          headers={**HEADERS, 'Prefer': 'return=minimal'})
+                    if resp.status_code < 400: print("Cleaned up null-close rows")
             else:
                 print("No new data fetched from VCI.")
                 df = None  # will be set below in load_existing_data
@@ -458,12 +467,16 @@ async def main():
         df['adj_close'] = df['close']
         df['adj_volume'] = df['volume']
         upsert_records = df.to_dict(orient='records')
+        fail = 0
         async with httpx.AsyncClient(timeout=300) as c:
             for i in range(0, len(upsert_records), 200):
                 batch = upsert_records[i:i+200]
-                await c.post(f"{REST_URL}/daily_bars_adjusted", json=batch,
-                             headers={**HEADERS, 'Prefer': 'resolution=merge-duplicates'})
-        print(f"Upserted {len(upsert_records)} bars")
+                resp = await c.post(f"{REST_URL}/daily_bars_adjusted", json=batch,
+                                    headers={**HEADERS, 'Prefer': 'resolution=merge-duplicates'})
+                if resp.status_code >= 400:
+                    fail += 1; print(f"  upsert batch {i//200} failed: {resp.status_code}")
+        if fail: print(f"Upserted {len(upsert_records)} bars ({fail} batches FAILED)")
+        else: print(f"Upserted {len(upsert_records)} bars")
 
     # If df is not set (no fetch needed or no new data), load existing data from DB
     if df is None:
